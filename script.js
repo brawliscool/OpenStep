@@ -17,12 +17,8 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const STORAGE_KEY = "openstep-billing-state-v1";
-  const DEEPSEEK_API_KEY_STORAGE_KEY = "openstep-deepseek-api-key-v1";
-  const DEEPSEEK_MODEL = "deepseek-chat";
-  const DEEPSEEK_FALLBACK_MODEL = "DeepSeek-V3.2";
-  const DEEPSEEK_BASE_URL_STORAGE_KEY = "openstep-deepseek-base-url-v1";
-  const DEEPSEEK_MODEL_STORAGE_KEY = "openstep-deepseek-model-v1";
-  const DEEPSEEK_MAX_OUTPUT_TOKENS = 4096;
+  const OPENAI_API_KEY_STORAGE_KEY = "openstep-openai-api-key-v1";
+  const OPENAI_MODEL = "gpt-5-nano-2025-08-07";
   const PLAN_CONFIG = {
     free: { name: "Free", monthlyCredits: 10, priceLabel: "$0/mo", speedLabel: "standard speed", solveDurationMs: 3400 },
     plus: { name: "Plus", monthlyCredits: 250, priceLabel: "$4.99/mo", speedLabel: "fast speed", solveDurationMs: 2000 },
@@ -265,65 +261,50 @@ document.addEventListener("DOMContentLoaded", () => {
     ].join("\n");
   };
 
-  const getDeepSeekApiKey = () => {
-    let apiKey = localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY) || "";
+  const getOpenAiApiKey = () => {
+    let apiKey = localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY) || "";
     if (apiKey) return apiKey;
-    apiKey = window.prompt("Enter your DeepSeek API key to enable solving:") || "";
+    apiKey = window.prompt("Enter your OpenAI API key to enable solving:") || "";
     apiKey = apiKey.trim();
     if (!apiKey) return "";
-    localStorage.setItem(DEEPSEEK_API_KEY_STORAGE_KEY, apiKey);
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, apiKey);
     return apiKey;
   };
 
+  const generateSolutionWithOpenAI = async (imageDataUrl, apiKey) => {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "Read this homework image and return strict JSON with keys: problem (string), steps (array of short strings).",
+              },
+              {
+                type: "input_image",
+                image_url: imageDataUrl,
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-  const getDeepSeekBaseUrl = () => {
-    const configuredBaseUrl =
-      localStorage.getItem(DEEPSEEK_BASE_URL_STORAGE_KEY) ||
-      (typeof window !== "undefined" && typeof window.OPENSTEP_DEEPSEEK_BASE_URL === "string"
-        ? window.OPENSTEP_DEEPSEEK_BASE_URL
-        : "");
-    const baseUrl = (configuredBaseUrl || "https://api.deepseek.com").trim().replace(/\/$/, "");
-    if (baseUrl) localStorage.setItem(DEEPSEEK_BASE_URL_STORAGE_KEY, baseUrl);
-    return baseUrl;
-  };
+    if (!response.ok) {
+      throw new Error(`OpenAI request failed (${response.status})`);
+    }
 
-
-  const getDeepSeekModelCandidates = () => {
-    const configuredModel =
-      localStorage.getItem(DEEPSEEK_MODEL_STORAGE_KEY) ||
-      (typeof window !== "undefined" && typeof window.OPENSTEP_DEEPSEEK_MODEL === "string"
-        ? window.OPENSTEP_DEEPSEEK_MODEL
-        : "");
-    const modelFromConfig = (configuredModel || "").trim();
-    if (modelFromConfig) localStorage.setItem(DEEPSEEK_MODEL_STORAGE_KEY, modelFromConfig);
-    return [modelFromConfig, DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL].filter((value, idx, arr) => value && arr.indexOf(value) === idx);
-  };
-
-  const isLikelyGenericFallbackSolution = (solution) => {
-    const normalizedProblem = String(solution?.problem || "").trim().toLowerCase();
-    const joinedSteps = Array.isArray(solution?.steps) ? solution.steps.join(" ").toLowerCase() : "";
-    return normalizedProblem.includes("solve for x: 3x + 7 = 28") && joinedSteps.includes("3x = 21") && joinedSteps.includes("x = 7");
-  };
-
-  const extractAssistantText = (messageContent) => {
-    if (typeof messageContent === "string") return messageContent;
-    if (!Array.isArray(messageContent)) return "";
-    return messageContent
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part.text === "string") return part.text;
-        return "";
-      })
-      .join("\n")
-      .trim();
-  };
-
-  const parseSolutionPayload = (content) => {
-    const raw = String(content || "").trim();
-    const normalized = raw.startsWith("```")
-      ? raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim()
-      : raw;
-    const parsed = JSON.parse(normalized);
+    const data = await response.json();
+    const outputText = data.output_text || "";
+    const parsed = JSON.parse(outputText);
     if (!parsed.problem || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
       throw new Error("Invalid model response");
     }
@@ -331,78 +312,6 @@ document.addEventListener("DOMContentLoaded", () => {
       problem: String(parsed.problem),
       steps: parsed.steps.map((step) => String(step)),
     };
-  };
-
-  const generateSolutionWithDeepSeek = async (imageDataUrl, apiKey) => {
-    const baseUrl = getDeepSeekBaseUrl();
-    const endpointCandidates = ["/chat/completions", "/v1/chat/completions"];
-    const modelCandidates = getDeepSeekModelCandidates();
-    const userMessageVariants = [
-      [
-        {
-          type: "text",
-          text: "Solve this homework image. Return strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.",
-        },
-        {
-          type: "image_url",
-          image_url: { url: imageDataUrl },
-        },
-      ],
-      "Solve the homework from this uploaded image data URL. Return strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
-        imageDataUrl,
-    ];
-
-    let lastError = null;
-
-    for (const endpoint of endpointCandidates) {
-      for (const model of modelCandidates) {
-        for (const userContent of userMessageVariants) {
-          const response = await fetch(`${baseUrl}${endpoint}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: "system",
-                  content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
-                },
-                {
-                  role: "user",
-                  content: userContent,
-                },
-              ],
-              max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
-              response_format: { type: "json_object" },
-              stream: false,
-            }),
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            const content = extractAssistantText(data.choices?.[0]?.message?.content);
-            const solution = parseSolutionPayload(content);
-            if (isLikelyGenericFallbackSolution(solution)) {
-              throw new Error("Model returned a generic fallback answer. Set a vision-capable model/server and retry.");
-            }
-            return solution;
-          }
-
-          if (response.status >= 500 || response.status === 404 || response.status === 400 || response.status === 422) {
-            lastError = new Error(`DeepSeek request failed (${response.status})`);
-            continue;
-          }
-
-          const errorText = await response.text();
-          throw new Error(`DeepSeek request failed (${response.status})${errorText ? `: ${errorText}` : ""}`);
-        }
-      }
-    }
-
-    throw lastError || new Error("DeepSeek request failed");
   };
 
   const handleFile = async (file) => {
@@ -479,9 +388,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const apiKey = getDeepSeekApiKey();
+    const apiKey = getOpenAiApiKey();
     if (!apiKey) {
-      showToast("DeepSeek API key required to solve.", true);
+      showToast("OpenAI API key required to solve.", true);
       return;
     }
 
@@ -493,7 +402,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (solveTimeoutId) clearTimeout(solveTimeoutId);
     solveTimeoutId = setTimeout(async () => {
       try {
-        const solution = await generateSolutionWithDeepSeek(state.currentImageDataUrl, apiKey);
+        const solution = await generateSolutionWithOpenAI(state.currentImageDataUrl, apiKey);
         setSolutionResult(solution);
         showToast("Solution generated.");
       } catch (error) {

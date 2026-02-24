@@ -299,7 +299,7 @@ document.addEventListener("DOMContentLoaded", () => {
         messages: [
           {
             role: "system",
-            content: "You are a helpful math tutor. Non-thinking mode. Return only valid JSON.",
+            content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
           },
           {
             role: "user",

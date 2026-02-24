@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenStep | AI Homework Solver</title>
+    <meta
+      name="description"
+      content="OpenStep lets students upload a photo of homework and get clear, step-by-step AI solutions in seconds."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./script.js" defer></script>
+  </head>
+  <body class="bg-black font-sans text-zinc-100 antialiased selection:bg-zinc-100 selection:text-black">
+    <div class="relative min-h-screen overflow-hidden">
+      <div aria-hidden="true" class="page-glow page-glow-left"></div>
+      <div aria-hidden="true" class="page-glow page-glow-right"></div>
+      <header class="border-b border-zinc-900">
+        <div class="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-3 sm:h-14 sm:flex-nowrap sm:gap-0 sm:px-5 sm:py-0">
+          <a href="#" class="inline-flex items-center gap-2 text-sm font-semibold text-zinc-100">
+            <span class="inline-flex h-5 w-5 items-center justify-center rounded bg-zinc-200 text-black">
+              <svg viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                <path d="M12 2a1 1 0 0 1 .89.55l1.1 2.2a1 1 0 0 0 .75.54l2.43.36a1 1 0 0 1 .55 1.7l-1.76 1.71a1 1 0 0 0-.28.9l.42 2.42a1 1 0 0 1-1.45 1.05L12.5 13.2a1 1 0 0 0-.93 0l-2.15 1.13a1 1 0 0 1-1.45-1.05l.42-2.42a1 1 0 0 0-.28-.9L6.35 8.25a1 1 0 0 1 .55-1.7l2.43-.36a1 1 0 0 0 .75-.54l1.1-2.2A1 1 0 0 1 12 2Z" />
+              </svg>
+            </span>
+            OpenStep AI
+          </a>
+          <div class="flex w-full items-center gap-2 sm:w-auto">
+            <div class="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs sm:flex-none">
+              <span id="planBadge" class="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-300">Free</span>
+              <span id="creditLabel" class="truncate text-zinc-500">Credits:</span>
+              <span id="creditCount" class="font-semibold text-zinc-100">5</span>
+            </div>
+            <button id="upgradeBtn" class="btn-secondary min-h-9 px-3 py-1.5 text-xs font-medium">
+              View Plans
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main class="mx-auto w-full max-w-6xl px-4 py-7 sm:px-5 sm:py-8">
+        <section>
+          <h1 class="inline-flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100 sm:text-2xl">
+            OpenStep Workspace
+          </h1>
+
+          <div class="mt-5 grid gap-5 sm:mt-6 lg:grid-cols-[1.15fr_1fr]">
+            <div class="app-card rounded-2xl p-4 sm:p-5">
+              <label
+                id="uploadDropzone"
+                for="fileInput"
+                class="upload-dropzone group flex min-h-[320px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-black px-4 text-center transition sm:min-h-[420px]"
+              >
+                <input id="fileInput" type="file" accept="image/*" class="hidden" />
+                <img id="previewImage" alt="Homework preview" class="mb-4 hidden max-h-52 w-auto rounded-md border border-zinc-800 object-contain sm:max-h-72" />
+                <span
+                  id="uploadIcon"
+                  class="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-900 text-zinc-300 transition group-hover:text-zinc-100"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
+                    <rect x="4.5" y="4.5" width="10" height="13" rx="1.5"></rect>
+                    <path d="M8 8.5h3"></path>
+                    <path d="M8 11h4"></path>
+                    <path d="m13.5 15.5 3-3m0 0 3 3m-3-3V20"></path>
+                  </svg>
+                </span>
+                <p id="uploadTitle" class="text-sm font-semibold text-zinc-100 sm:text-base">Upload Problem</p>
+                <p id="uploadHint" class="mt-1 text-[11px] text-zinc-500 sm:text-xs">Drag & drop or click to select a homework image</p>
+              </label>
+
+              <div class="mt-4 grid grid-cols-2 gap-2 sm:max-w-xs">
+                <button id="cropBtn" class="btn-secondary min-h-10 px-3 py-2 text-xs">
+                  Crop Center
+                </button>
+                <button id="resetBtn" class="btn-secondary min-h-10 px-3 py-2 text-xs">
+                  Reset
+                </button>
+              </div>
+
+              <div class="mt-4 flex flex-wrap items-center gap-2">
+                <button id="solveBtn" class="btn-primary min-h-10 w-full px-4 py-2 text-sm font-semibold sm:w-auto">
+                  Solve Problem
+                </button>
+                <span class="text-xs text-zinc-500">Each solve uses 1 credit.</span>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-5">
+              <div class="app-card rounded-2xl p-4 sm:p-5">
+                <p class="app-eyebrow inline-flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-3.5 w-3.5 text-zinc-500">
+                    <path d="m12 3 2.7 5.4L20 11l-3.8 3.7.9 5.3L12 17.7 6.9 20l.9-5.3L4 11l5.3-2.6L12 3z"></path>
+                  </svg>
+                  Tips for Better Results
+                </p>
+                <div class="mt-3 space-y-2 text-xs text-zinc-400">
+                  <div class="rounded-md border border-zinc-800 bg-black px-3 py-2">Good lighting</div>
+                  <div class="rounded-md border border-zinc-800 bg-black px-3 py-2">Keep full question visible</div>
+                  <div class="rounded-md border border-zinc-800 bg-black px-3 py-2">Avoid blur/shadows</div>
+                </div>
+              </div>
+
+              <div id="solutionPanel" class="app-card flex-1 rounded-2xl p-4 sm:p-5">
+                <p class="app-eyebrow inline-flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-3.5 w-3.5 text-zinc-500">
+                    <path d="M6 4h12v16H6z"></path>
+                    <path d="M9 9h6M9 13h6"></path>
+                  </svg>
+                  Solution Output
+                </p>
+
+                <div id="solutionSkeleton" class="mt-3 hidden rounded-xl border border-zinc-900 bg-black p-4">
+                  <p class="app-eyebrow">AI Solve Progress</p>
+                  <p id="solutionStatusText" class="mt-2 text-sm font-medium text-zinc-200">Scanning image...</p>
+                  <ul id="solutionStatusList" class="mt-3 space-y-2 text-xs text-zinc-500">
+                    <li data-step="0" class="status-step">
+                      <span class="status-dot"></span>
+                      Scanning image
+                    </li>
+                    <li data-step="1" class="status-step">
+                      <span class="status-dot"></span>
+                      Identifying equations
+                    </li>
+                    <li data-step="2" class="status-step">
+                      <span class="status-dot"></span>
+                      Calculating step-by-step solution
+                    </li>
+                    <li data-step="3" class="status-step">
+                      <span class="status-dot"></span>
+                      Finalizing answer
+                    </li>
+                  </ul>
+                </div>
+
+                <div id="solutionResult" class="mt-3 hidden rounded-xl border border-zinc-900 bg-black p-4">
+                  <div id="solutionText" class="space-y-2"></div>
+                  <div class="mt-4 grid gap-2 sm:flex sm:flex-wrap">
+                    <button id="exportNotesBtn" class="btn-secondary min-h-10 px-3 py-2 text-xs">
+                      Export Notes (.txt)
+                    </button>
+                    <button id="exportPdfBtn" class="btn-secondary min-h-10 px-3 py-2 text-xs">
+                      Export as PDF
+                    </button>
+                  </div>
+                </div>
+
+                <div id="solutionEmpty" class="mt-3 min-h-[300px] rounded-xl border border-zinc-900 bg-black p-4 text-xs text-zinc-600 sm:min-h-[360px]">
+                  Add a problem image to start your AI-powered step-by-step solution.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast pointer-events-none fixed bottom-4 right-4 z-50 rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs text-zinc-100 opacity-0 sm:bottom-6 sm:right-6">
+        Saved
+      </div>
+
+      <div id="upgradeModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/70 p-4">
+        <div class="app-card w-full max-w-md rounded-2xl p-5">
+          <h2 class="text-lg font-semibold text-zinc-100">Choose a plan</h2>
+          <p class="mt-2 text-sm text-zinc-400">
+            Upgrade with Stripe to unlock more monthly credits.
+          </p>
+          <div class="mt-4 space-y-2">
+            <div class="rounded-lg border border-zinc-800 bg-black p-3">
+              <p class="text-sm font-semibold text-zinc-100">Plus - $4.99/month</p>
+              <p class="mt-1 text-xs text-zinc-400">250 monthly solve credits</p>
+              <button id="stripeCheckoutPlusBtn" class="btn-primary mt-2 w-full px-3 py-2 text-xs font-semibold">
+                Continue with Plus
+              </button>
+            </div>
+            <div class="rounded-lg border border-zinc-800 bg-black p-3">
+              <p class="text-sm font-semibold text-zinc-100">Pro - $19.99/month</p>
+              <p class="mt-1 text-xs text-zinc-400">1200 monthly solve credits</p>
+              <button id="stripeCheckoutProBtn" class="btn-primary mt-2 w-full px-3 py-2 text-xs font-semibold">
+                Continue with Pro
+              </button>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button id="closeUpgradeModalBtn" class="btn-secondary px-3 py-2 text-xs">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="border-t border-zinc-950 py-3">
+        <p class="text-center text-[11px] text-zinc-700">&copy; 2026 OpenStep AI. AI can make mistakes.</p>
+      </footer>
+    </div>
+  </body>
+</html>

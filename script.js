@@ -63,6 +63,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  const setElementVisibility = (node, shouldShow, visibleClass = "flex") => {
+    if (!node) return;
+    if (shouldShow) {
+      node.classList.remove("hidden");
+      node.classList.add(visibleClass);
+      return;
+    }
+    node.classList.remove(visibleClass);
+    node.classList.add("hidden");
+  };
+
   const getCycleKey = (date = new Date()) => {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     return `${date.getFullYear()}-${month}`;
@@ -121,6 +132,16 @@ document.addEventListener("DOMContentLoaded", () => {
   let toastTimeoutId = null;
   let solveTimeoutId = null;
   let solveStatusIntervalId = null;
+
+  const clearSolveTimeout = () => {
+    if (!solveTimeoutId) return;
+    clearTimeout(solveTimeoutId);
+    solveTimeoutId = null;
+  };
+
+  const updateUpgradeModalVisibility = (shouldOpen) => {
+    setElementVisibility(el.upgradeModal, shouldOpen, "flex");
+  };
 
   const showToast = (message, isError = false) => {
     if (!el.toast) return;
@@ -274,6 +295,103 @@ document.addEventListener("DOMContentLoaded", () => {
     reader.readAsDataURL(file);
   };
 
+  const bindDropzoneEvents = () => {
+    ["dragenter", "dragover"].forEach((eventName) => {
+      el.dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        el.dropzone.classList.add("dropzone-active");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      el.dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        el.dropzone.classList.remove("dropzone-active");
+      });
+    });
+
+    el.dropzone.addEventListener("drop", async (event) => {
+      const file = event.dataTransfer?.files?.[0];
+      await handleFile(file);
+    });
+  };
+
+  const getDemoSolution = () => ({
+    problem: "Solve for x: 3x + 7 = 28",
+    steps: ["Subtract 7 from both sides: 3x = 21", "Divide both sides by 3: x = 7"],
+  });
+
+  const requireSolutionForExport = () => {
+    if (state.latestSolutionText) return true;
+    showToast("No solution to export yet.", true);
+    return false;
+  };
+
+  const triggerTextDownload = (content, fileName) => {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const solveCurrentImage = () => {
+    if (!state.currentImageDataUrl) {
+      showToast("Upload a homework photo first.", true);
+      return;
+    }
+    if (state.credits <= 0) {
+      showToast("No credits left. Upgrade your plan.", true);
+      return;
+    }
+
+    state.credits -= 1;
+    updateCredits();
+    const solveDurationMs = PLAN_CONFIG[state.plan].solveDurationMs;
+    setSolutionLoading(solveDurationMs);
+
+    clearSolveTimeout();
+    solveTimeoutId = setTimeout(() => {
+      setSolutionResult(getDemoSolution());
+      showToast("Solution generated.");
+    }, solveDurationMs);
+  };
+
+  const closeUpgradeModal = () => updateUpgradeModalVisibility(false);
+
+  const activatePlan = (plan) => {
+    if (!Object.prototype.hasOwnProperty.call(PLAN_CONFIG, plan)) return;
+    state.plan = plan;
+    state.credits = Math.max(state.credits, PLAN_CONFIG[plan].monthlyCredits);
+    updateCredits();
+  };
+
+  const ensureStripeLinkConfigured = (plan) => {
+    const checkoutUrl = STRIPE_CHECKOUT_URLS[plan] || "";
+    return checkoutUrl.startsWith("https://") && !checkoutUrl.includes("REPLACE_WITH_");
+  };
+
+  const handleStripeCheckout = (plan) => {
+    if (!ensureStripeLinkConfigured(plan)) {
+      showToast(`Set your ${PLAN_CONFIG[plan].name} Stripe link in script.js first.`, true);
+      return;
+    }
+    window.location.href = STRIPE_CHECKOUT_URLS[plan];
+  };
+
+  const consumeQueryParam = (params, key, expectedValue, onMatch) => {
+    const value = params.get(key);
+    if (value !== expectedValue) return;
+    onMatch(value);
+    params.delete(key);
+  };
+
   el.dropzone.addEventListener("click", () => {
     el.fileInput.value = "";
   });
@@ -282,27 +400,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const file = event.target.files?.[0];
     await handleFile(file);
   });
-
-  ["dragenter", "dragover"].forEach((eventName) => {
-    el.dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      el.dropzone.classList.add("dropzone-active");
-    });
-  });
-
-  ["dragleave", "drop"].forEach((eventName) => {
-    el.dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      el.dropzone.classList.remove("dropzone-active");
-    });
-  });
-
-  el.dropzone.addEventListener("drop", async (event) => {
-    const file = event.dataTransfer?.files?.[0];
-    await handleFile(file);
-  });
+  bindDropzoneEvents();
 
   if (el.cropBtn) {
     el.cropBtn.addEventListener("click", async (event) => {
@@ -323,83 +421,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  el.solveBtn.addEventListener("click", () => {
-    if (!state.currentImageDataUrl) {
-      showToast("Upload a homework photo first.", true);
-      return;
-    }
-    if (state.credits <= 0) {
-      showToast("No credits left. Upgrade your plan.", true);
-      return;
-    }
-
-    state.credits -= 1;
-    updateCredits();
-    const solveDurationMs = PLAN_CONFIG[state.plan].solveDurationMs;
-    setSolutionLoading(solveDurationMs);
-
-    if (solveTimeoutId) clearTimeout(solveTimeoutId);
-    solveTimeoutId = setTimeout(() => {
-      const solution = {
-        problem: "Solve for x: 3x + 7 = 28",
-        steps: ["Subtract 7 from both sides: 3x = 21", "Divide both sides by 3: x = 7"],
-      };
-      setSolutionResult(solution);
-      showToast("Solution generated.");
-    }, solveDurationMs);
-  });
+  el.solveBtn.addEventListener("click", solveCurrentImage);
 
   if (el.exportNotesBtn) {
     el.exportNotesBtn.addEventListener("click", () => {
-      if (!state.latestSolutionText) {
-        showToast("No solution to export yet.", true);
-        return;
-      }
-      const blob = new Blob([state.latestSolutionText], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "openstep-solution-notes.txt";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      if (!requireSolutionForExport()) return;
+      triggerTextDownload(state.latestSolutionText, "openstep-solution-notes.txt");
       showToast("Notes exported.");
     });
   }
 
   if (el.exportPdfBtn) {
     el.exportPdfBtn.addEventListener("click", () => {
-      if (!state.latestSolutionText) {
-        showToast("No solution to export yet.", true);
-        return;
-      }
+      if (!requireSolutionForExport()) return;
       window.print();
     });
   }
 
-  const openUpgradeModal = () => {
-    if (!el.upgradeModal) return;
-    el.upgradeModal.classList.remove("hidden");
-    el.upgradeModal.classList.add("flex");
-  };
-  const closeUpgradeModal = () => {
-    if (!el.upgradeModal) return;
-    el.upgradeModal.classList.remove("flex");
-    el.upgradeModal.classList.add("hidden");
-  };
-  const activatePlan = (plan) => {
-    if (!Object.prototype.hasOwnProperty.call(PLAN_CONFIG, plan)) return;
-    state.plan = plan;
-    state.credits = Math.max(state.credits, PLAN_CONFIG[plan].monthlyCredits);
-    updateCredits();
-  };
-  const ensureStripeLinkConfigured = (plan) => {
-    const checkoutUrl = STRIPE_CHECKOUT_URLS[plan] || "";
-    return checkoutUrl.startsWith("https://") && !checkoutUrl.includes("REPLACE_WITH_");
-  };
-
-  if (el.upgradeBtn) el.upgradeBtn.addEventListener("click", openUpgradeModal);
+  if (el.upgradeBtn) el.upgradeBtn.addEventListener("click", () => updateUpgradeModalVisibility(true));
   if (el.closeUpgradeModalBtn) el.closeUpgradeModalBtn.addEventListener("click", closeUpgradeModal);
   if (el.upgradeModal) {
     el.upgradeModal.addEventListener("click", (event) => {
@@ -408,23 +447,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (el.stripeCheckoutPlusBtn) {
-    el.stripeCheckoutPlusBtn.addEventListener("click", () => {
-      if (!ensureStripeLinkConfigured("plus")) {
-        showToast("Set your Plus Stripe link in script.js first.", true);
-        return;
-      }
-      window.location.href = STRIPE_CHECKOUT_URLS.plus;
-    });
+    el.stripeCheckoutPlusBtn.addEventListener("click", () => handleStripeCheckout("plus"));
   }
 
   if (el.stripeCheckoutProBtn) {
-    el.stripeCheckoutProBtn.addEventListener("click", () => {
-      if (!ensureStripeLinkConfigured("pro")) {
-        showToast("Set your Pro Stripe link in script.js first.", true);
-        return;
-      }
-      window.location.href = STRIPE_CHECKOUT_URLS.pro;
-    });
+    el.stripeCheckoutProBtn.addEventListener("click", () => handleStripeCheckout("pro"));
   }
 
   const params = new URLSearchParams(window.location.search);
@@ -434,15 +461,10 @@ document.addEventListener("DOMContentLoaded", () => {
     activatePlan(resolvedPlan);
     showToast(`${PLAN_CONFIG[resolvedPlan].name} plan activated.`);
     params.delete("upgraded");
-    const newQuery = params.toString();
-    window.history.replaceState({}, "", `${window.location.pathname}${newQuery ? `?${newQuery}` : ""}`);
   }
-  if (params.get("canceled") === "1") {
-    showToast("Checkout canceled.");
-    params.delete("canceled");
-    const newQuery = params.toString();
-    window.history.replaceState({}, "", `${window.location.pathname}${newQuery ? `?${newQuery}` : ""}`);
-  }
+  consumeQueryParam(params, "canceled", "1", () => showToast("Checkout canceled."));
+  const newQuery = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${newQuery ? `?${newQuery}` : ""}`);
 
   updateCredits();
 });

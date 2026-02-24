@@ -17,6 +17,8 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const STORAGE_KEY = "openstep-billing-state-v1";
+  const OPENAI_API_KEY_STORAGE_KEY = "openstep-openai-api-key-v1";
+  const OPENAI_MODEL = "gpt-5-nano-2025-08-07";
   const PLAN_CONFIG = {
     free: { name: "Free", monthlyCredits: 10, priceLabel: "$0/mo", speedLabel: "standard speed", solveDurationMs: 3400 },
     plus: { name: "Plus", monthlyCredits: 250, priceLabel: "$4.99/mo", speedLabel: "fast speed", solveDurationMs: 2000 },
@@ -259,6 +261,59 @@ document.addEventListener("DOMContentLoaded", () => {
     ].join("\n");
   };
 
+  const getOpenAiApiKey = () => {
+    let apiKey = localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY) || "";
+    if (apiKey) return apiKey;
+    apiKey = window.prompt("Enter your OpenAI API key to enable solving:") || "";
+    apiKey = apiKey.trim();
+    if (!apiKey) return "";
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, apiKey);
+    return apiKey;
+  };
+
+  const generateSolutionWithOpenAI = async (imageDataUrl, apiKey) => {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "Read this homework image and return strict JSON with keys: problem (string), steps (array of short strings).",
+              },
+              {
+                type: "input_image",
+                image_url: imageDataUrl,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI request failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    const outputText = data.output_text || "";
+    const parsed = JSON.parse(outputText);
+    if (!parsed.problem || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      throw new Error("Invalid model response");
+    }
+    return {
+      problem: String(parsed.problem),
+      steps: parsed.steps.map((step) => String(step)),
+    };
+  };
+
   const handleFile = async (file) => {
     if (!file || !file.type.startsWith("image/")) {
       showToast("Please upload an image file.", true);
@@ -323,7 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  el.solveBtn.addEventListener("click", () => {
+  el.solveBtn.addEventListener("click", async () => {
     if (!state.currentImageDataUrl) {
       showToast("Upload a homework photo first.", true);
       return;
@@ -333,19 +388,31 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const apiKey = getOpenAiApiKey();
+    if (!apiKey) {
+      showToast("OpenAI API key required to solve.", true);
+      return;
+    }
+
     state.credits -= 1;
     updateCredits();
     const solveDurationMs = PLAN_CONFIG[state.plan].solveDurationMs;
     setSolutionLoading(solveDurationMs);
 
     if (solveTimeoutId) clearTimeout(solveTimeoutId);
-    solveTimeoutId = setTimeout(() => {
-      const solution = {
-        problem: "Solve for x: 3x + 7 = 28",
-        steps: ["Subtract 7 from both sides: 3x = 21", "Divide both sides by 3: x = 7"],
-      };
-      setSolutionResult(solution);
-      showToast("Solution generated.");
+    solveTimeoutId = setTimeout(async () => {
+      try {
+        const solution = await generateSolutionWithOpenAI(state.currentImageDataUrl, apiKey);
+        setSolutionResult(solution);
+        showToast("Solution generated.");
+      } catch (error) {
+        state.credits += 1;
+        updateCredits();
+        clearSolveStatusTimer();
+        if (el.solutionSkeleton) el.solutionSkeleton.classList.add("hidden");
+        if (el.solutionEmpty) el.solutionEmpty.classList.remove("hidden");
+        showToast(error instanceof Error ? error.message : "Solve failed.", true);
+      }
     }, solveDurationMs);
   });
 

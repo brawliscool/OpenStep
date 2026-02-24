@@ -17,6 +17,9 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const STORAGE_KEY = "openstep-billing-state-v1";
+  const DEEPSEEK_API_KEY_STORAGE_KEY = "openstep-deepseek-api-key-v1";
+  const DEEPSEEK_MODEL = "DeepSeek-V3.2";
+  const DEEPSEEK_MAX_OUTPUT_TOKENS = 4096;
   const PLAN_CONFIG = {
     free: { name: "Free", monthlyCredits: 10, priceLabel: "$0/mo", speedLabel: "standard speed", solveDurationMs: 3400 },
     plus: { name: "Plus", monthlyCredits: 250, priceLabel: "$4.99/mo", speedLabel: "fast speed", solveDurationMs: 2000 },
@@ -259,6 +262,67 @@ document.addEventListener("DOMContentLoaded", () => {
     ].join("\n");
   };
 
+  const getDeepSeekApiKey = () => {
+    let apiKey = localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY) || "";
+    if (apiKey) return apiKey;
+    apiKey = window.prompt("Enter your DeepSeek API key to enable solving:") || "";
+    apiKey = apiKey.trim();
+    if (!apiKey) return "";
+    localStorage.setItem(DEEPSEEK_API_KEY_STORAGE_KEY, apiKey);
+    return apiKey;
+  };
+
+  const parseSolutionPayload = (content) => {
+    const raw = String(content || "").trim();
+    const normalized = raw.startsWith("```")
+      ? raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim()
+      : raw;
+    const parsed = JSON.parse(normalized);
+    if (!parsed.problem || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      throw new Error("Invalid model response");
+    }
+    return {
+      problem: String(parsed.problem),
+      steps: parsed.steps.map((step) => String(step)),
+    };
+  };
+
+  const generateSolutionWithDeepSeek = async (imageDataUrl, apiKey) => {
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: "You are a helpful math tutor. Non-thinking mode. Return only valid JSON.",
+          },
+          {
+            role: "user",
+            content:
+              "Solve the homework from this uploaded image data URL. Respond with strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
+              imageDataUrl,
+          },
+        ],
+        max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
+        response_format: { type: "json_object" },
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`DeepSeek request failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    return parseSolutionPayload(content);
+  };
+
   const handleFile = async (file) => {
     if (!file || !file.type.startsWith("image/")) {
       showToast("Please upload an image file.", true);
@@ -323,7 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  el.solveBtn.addEventListener("click", () => {
+  el.solveBtn.addEventListener("click", async () => {
     if (!state.currentImageDataUrl) {
       showToast("Upload a homework photo first.", true);
       return;
@@ -333,19 +397,31 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const apiKey = getDeepSeekApiKey();
+    if (!apiKey) {
+      showToast("DeepSeek API key required to solve.", true);
+      return;
+    }
+
     state.credits -= 1;
     updateCredits();
     const solveDurationMs = PLAN_CONFIG[state.plan].solveDurationMs;
     setSolutionLoading(solveDurationMs);
 
     if (solveTimeoutId) clearTimeout(solveTimeoutId);
-    solveTimeoutId = setTimeout(() => {
-      const solution = {
-        problem: "Solve for x: 3x + 7 = 28",
-        steps: ["Subtract 7 from both sides: 3x = 21", "Divide both sides by 3: x = 7"],
-      };
-      setSolutionResult(solution);
-      showToast("Solution generated.");
+    solveTimeoutId = setTimeout(async () => {
+      try {
+        const solution = await generateSolutionWithDeepSeek(state.currentImageDataUrl, apiKey);
+        setSolutionResult(solution);
+        showToast("Solution generated.");
+      } catch (error) {
+        state.credits += 1;
+        updateCredits();
+        clearSolveStatusTimer();
+        if (el.solutionSkeleton) el.solutionSkeleton.classList.add("hidden");
+        if (el.solutionEmpty) el.solutionEmpty.classList.remove("hidden");
+        showToast(error instanceof Error ? error.message : "Solve failed.", true);
+      }
     }, solveDurationMs);
   });
 

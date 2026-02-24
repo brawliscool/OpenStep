@@ -19,6 +19,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const STORAGE_KEY = "openstep-billing-state-v1";
   const DEEPSEEK_API_KEY_STORAGE_KEY = "openstep-deepseek-api-key-v1";
   const DEEPSEEK_MODEL = "DeepSeek-V3.2";
+  const DEEPSEEK_FALLBACK_MODEL = "deepseek-chat";
+  const DEEPSEEK_BASE_URL_STORAGE_KEY = "openstep-deepseek-base-url-v1";
   const DEEPSEEK_MAX_OUTPUT_TOKENS = 4096;
   const PLAN_CONFIG = {
     free: { name: "Free", monthlyCredits: 10, priceLabel: "$0/mo", speedLabel: "standard speed", solveDurationMs: 3400 },
@@ -272,6 +274,18 @@ document.addEventListener("DOMContentLoaded", () => {
     return apiKey;
   };
 
+
+  const getDeepSeekBaseUrl = () => {
+    const configuredBaseUrl =
+      localStorage.getItem(DEEPSEEK_BASE_URL_STORAGE_KEY) ||
+      (typeof window !== "undefined" && typeof window.OPENSTEP_DEEPSEEK_BASE_URL === "string"
+        ? window.OPENSTEP_DEEPSEEK_BASE_URL
+        : "");
+    const baseUrl = (configuredBaseUrl || "https://api.deepseek.com").trim().replace(/\/$/, "");
+    if (baseUrl) localStorage.setItem(DEEPSEEK_BASE_URL_STORAGE_KEY, baseUrl);
+    return baseUrl;
+  };
+
   const parseSolutionPayload = (content) => {
     const raw = String(content || "").trim();
     const normalized = raw.startsWith("```")
@@ -288,39 +302,62 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const generateSolutionWithDeepSeek = async (imageDataUrl, apiKey) => {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
-          },
-          {
-            role: "user",
-            content:
-              "Solve the homework from this uploaded image data URL. Respond with strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
-              imageDataUrl,
-          },
-        ],
-        max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
-        response_format: { type: "json_object" },
-        stream: false,
-      }),
-    });
+    const baseUrl = getDeepSeekBaseUrl();
+    const endpointCandidates = ["/chat/completions", "/v1/chat/completions"];
+    const modelCandidates = [DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL];
 
-    if (!response.ok) {
-      throw new Error(`DeepSeek request failed (${response.status})`);
+    let lastError = null;
+
+    for (const endpoint of endpointCandidates) {
+      for (const model of modelCandidates) {
+        const response = await fetch(`${baseUrl}${endpoint}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
+              },
+              {
+                role: "user",
+                content:
+                  "Solve the homework from this uploaded image data URL. Respond with strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
+                  imageDataUrl,
+              },
+            ],
+            max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
+            response_format: { type: "json_object" },
+            stream: false,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content || "";
+          return parseSolutionPayload(content);
+        }
+
+        if (response.status >= 500) {
+          lastError = new Error(`DeepSeek request failed (${response.status})`);
+          continue;
+        }
+
+        if (response.status === 404 || response.status === 400) {
+          lastError = new Error(`DeepSeek request failed (${response.status})`);
+          continue;
+        }
+
+        const errorText = await response.text();
+        throw new Error(`DeepSeek request failed (${response.status})${errorText ? `: ${errorText}` : ""}`);
+      }
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    return parseSolutionPayload(content);
+    throw lastError || new Error("DeepSeek request failed");
   };
 
   const handleFile = async (file) => {

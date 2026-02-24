@@ -286,6 +286,19 @@ document.addEventListener("DOMContentLoaded", () => {
     return baseUrl;
   };
 
+  const extractAssistantText = (messageContent) => {
+    if (typeof messageContent === "string") return messageContent;
+    if (!Array.isArray(messageContent)) return "";
+    return messageContent
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part.text === "string") return part.text;
+        return "";
+      })
+      .join("\n")
+      .trim();
+  };
+
   const parseSolutionPayload = (content) => {
     const raw = String(content || "").trim();
     const normalized = raw.startsWith("```")
@@ -305,55 +318,64 @@ document.addEventListener("DOMContentLoaded", () => {
     const baseUrl = getDeepSeekBaseUrl();
     const endpointCandidates = ["/chat/completions", "/v1/chat/completions"];
     const modelCandidates = [DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL];
+    const userMessageVariants = [
+      [
+        {
+          type: "text",
+          text: "Solve this homework image. Return strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.",
+        },
+        {
+          type: "image_url",
+          image_url: { url: imageDataUrl },
+        },
+      ],
+      "Solve the homework from this uploaded image data URL. Return strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
+        imageDataUrl,
+    ];
 
     let lastError = null;
 
     for (const endpoint of endpointCandidates) {
       for (const model of modelCandidates) {
-        const response = await fetch(`${baseUrl}${endpoint}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
-              },
-              {
-                role: "user",
-                content:
-                  "Solve the homework from this uploaded image data URL. Respond with strict JSON only: {\"problem\": string, \"steps\": string[]}. Keep steps concise.\n\nImage data URL:\n" +
-                  imageDataUrl,
-              },
-            ],
-            max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
-            response_format: { type: "json_object" },
-            stream: false,
-          }),
-        });
+        for (const userContent of userMessageVariants) {
+          const response = await fetch(`${baseUrl}${endpoint}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                {
+                  role: "system",
+                  content: "You are a very smart and helpful tutor. Non-thinking mode. Return only valid JSON.",
+                },
+                {
+                  role: "user",
+                  content: userContent,
+                },
+              ],
+              max_tokens: DEEPSEEK_MAX_OUTPUT_TOKENS,
+              response_format: { type: "json_object" },
+              stream: false,
+            }),
+          });
 
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.choices?.[0]?.message?.content || "";
-          return parseSolutionPayload(content);
+          if (response.ok) {
+            const data = await response.json();
+            const content = extractAssistantText(data.choices?.[0]?.message?.content);
+            return parseSolutionPayload(content);
+          }
+
+          if (response.status >= 500 || response.status === 404 || response.status === 400 || response.status === 422) {
+            lastError = new Error(`DeepSeek request failed (${response.status})`);
+            continue;
+          }
+
+          const errorText = await response.text();
+          throw new Error(`DeepSeek request failed (${response.status})${errorText ? `: ${errorText}` : ""}`);
         }
-
-        if (response.status >= 500) {
-          lastError = new Error(`DeepSeek request failed (${response.status})`);
-          continue;
-        }
-
-        if (response.status === 404 || response.status === 400) {
-          lastError = new Error(`DeepSeek request failed (${response.status})`);
-          continue;
-        }
-
-        const errorText = await response.text();
-        throw new Error(`DeepSeek request failed (${response.status})${errorText ? `: ${errorText}` : ""}`);
       }
     }
 

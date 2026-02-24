@@ -18,9 +18,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const STORAGE_KEY = "openstep-billing-state-v1";
   const DEEPSEEK_API_KEY_STORAGE_KEY = "openstep-deepseek-api-key-v1";
-  const DEEPSEEK_MODEL = "DeepSeek-V3.2";
-  const DEEPSEEK_FALLBACK_MODEL = "deepseek-chat";
+  const DEEPSEEK_MODEL = "deepseek-chat";
+  const DEEPSEEK_FALLBACK_MODEL = "DeepSeek-V3.2";
   const DEEPSEEK_BASE_URL_STORAGE_KEY = "openstep-deepseek-base-url-v1";
+  const DEEPSEEK_MODEL_STORAGE_KEY = "openstep-deepseek-model-v1";
   const DEEPSEEK_MAX_OUTPUT_TOKENS = 4096;
   const PLAN_CONFIG = {
     free: { name: "Free", monthlyCredits: 10, priceLabel: "$0/mo", speedLabel: "standard speed", solveDurationMs: 3400 },
@@ -286,6 +287,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return baseUrl;
   };
 
+
+  const getDeepSeekModelCandidates = () => {
+    const configuredModel =
+      localStorage.getItem(DEEPSEEK_MODEL_STORAGE_KEY) ||
+      (typeof window !== "undefined" && typeof window.OPENSTEP_DEEPSEEK_MODEL === "string"
+        ? window.OPENSTEP_DEEPSEEK_MODEL
+        : "");
+    const modelFromConfig = (configuredModel || "").trim();
+    if (modelFromConfig) localStorage.setItem(DEEPSEEK_MODEL_STORAGE_KEY, modelFromConfig);
+    return [modelFromConfig, DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL].filter((value, idx, arr) => value && arr.indexOf(value) === idx);
+  };
+
+  const isLikelyGenericFallbackSolution = (solution) => {
+    const normalizedProblem = String(solution?.problem || "").trim().toLowerCase();
+    const joinedSteps = Array.isArray(solution?.steps) ? solution.steps.join(" ").toLowerCase() : "";
+    return normalizedProblem.includes("solve for x: 3x + 7 = 28") && joinedSteps.includes("3x = 21") && joinedSteps.includes("x = 7");
+  };
+
   const extractAssistantText = (messageContent) => {
     if (typeof messageContent === "string") return messageContent;
     if (!Array.isArray(messageContent)) return "";
@@ -317,7 +336,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const generateSolutionWithDeepSeek = async (imageDataUrl, apiKey) => {
     const baseUrl = getDeepSeekBaseUrl();
     const endpointCandidates = ["/chat/completions", "/v1/chat/completions"];
-    const modelCandidates = [DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL];
+    const modelCandidates = getDeepSeekModelCandidates();
     const userMessageVariants = [
       [
         {
@@ -365,7 +384,11 @@ document.addEventListener("DOMContentLoaded", () => {
           if (response.ok) {
             const data = await response.json();
             const content = extractAssistantText(data.choices?.[0]?.message?.content);
-            return parseSolutionPayload(content);
+            const solution = parseSolutionPayload(content);
+            if (isLikelyGenericFallbackSolution(solution)) {
+              throw new Error("Model returned a generic fallback answer. Set a vision-capable model/server and retry.");
+            }
+            return solution;
           }
 
           if (response.status >= 500 || response.status === 404 || response.status === 400 || response.status === 422) {

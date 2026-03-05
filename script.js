@@ -223,11 +223,60 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const renderSolutionHtml = ({ problem, steps }) => {
+    if (!problem && (!steps || !steps.length)) return "";
     const esc = (text) => text.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     const stepHtml = steps
       .map((step, index) => `<div class="solution-line solution-step"><span class="solution-line-title">Step ${index + 1}:</span> ${esc(step)}</div>`)
       .join("");
     return `<div class="solution-line solution-line-title">Detected Problem: ${esc(problem)}</div>${stepHtml}`;
+  };
+
+  const parseAiAnswer = (answerText) => {
+    if (!answerText) {
+      return {
+        problem: "No problem text detected.",
+        steps: ["The model returned an empty response."],
+      };
+    }
+
+    const lines = answerText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const problemLine = lines.find((line) => /^problem[:\-]/i.test(line));
+    const stepLines = lines
+      .filter((line) => /^step\s*\d*[:\-]/i.test(line) || /^\d+[\).\s-]/.test(line))
+      .map((line) => line.replace(/^step\s*\d*[:\-]\s*/i, "").replace(/^\d+[\).\s-]+/, "").trim())
+      .filter(Boolean);
+
+    if (stepLines.length > 0) {
+      return {
+        problem: problemLine ? problemLine.replace(/^problem[:\-]\s*/i, "").trim() : "Detected from uploaded image",
+        steps: stepLines,
+      };
+    }
+
+    return {
+      problem: "Detected from uploaded image",
+      steps: [answerText.trim()],
+    };
+  };
+
+  const requestAiSolution = async (imageDataUrl) => {
+    const response = await fetch("/api/solve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageDataUrl }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error || "Unable to solve this image right now.";
+      throw new Error(message);
+    }
+
+    return parseAiAnswer(payload?.answer || "");
   };
 
   const setSolutionLoading = (solveDurationMs) => {
@@ -323,7 +372,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  el.solveBtn.addEventListener("click", () => {
+  el.solveBtn.addEventListener("click", async () => {
     if (!state.currentImageDataUrl) {
       showToast("Upload a homework photo first.", true);
       return;
@@ -333,20 +382,26 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const previousCredits = state.credits;
     state.credits -= 1;
     updateCredits();
     const solveDurationMs = PLAN_CONFIG[state.plan].solveDurationMs;
     setSolutionLoading(solveDurationMs);
 
     if (solveTimeoutId) clearTimeout(solveTimeoutId);
-    solveTimeoutId = setTimeout(() => {
-      const solution = {
-        problem: "Solve for x: 3x + 7 = 28",
-        steps: ["Subtract 7 from both sides: 3x = 21", "Divide both sides by 3: x = 7"],
-      };
+    try {
+      const solution = await requestAiSolution(state.currentImageDataUrl);
       setSolutionResult(solution);
       showToast("Solution generated.");
-    }, solveDurationMs);
+    } catch (error) {
+      state.credits = previousCredits;
+      updateCredits();
+      clearSolveStatusTimer();
+      if (el.solutionSkeleton) el.solutionSkeleton.classList.add("hidden");
+      if (el.solutionResult) el.solutionResult.classList.add("hidden");
+      if (el.solutionEmpty) el.solutionEmpty.classList.remove("hidden");
+      showToast(error instanceof Error ? error.message : "Failed to solve image.", true);
+    }
   });
 
   if (el.exportNotesBtn) {
